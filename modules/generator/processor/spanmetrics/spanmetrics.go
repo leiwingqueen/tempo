@@ -152,10 +152,12 @@ func (p *Processor) aggregateMetrics(resourceSpans []*v1_trace.ResourceSpans) {
 
 func (p *Processor) aggregateMetricsForSpan(svcName string, jobName string, instanceID string, rs *v1.Resource, span *v1_trace.Span, resourceLabels []string, resourceValues []string) {
 	// Spans with negative latency are treated as zero.
-	// TODO: calculate the latency in the backend
+	// calculate the latency in the backend
 	// convert nanoseconds to seconds with span.GetEndTimeUnixNano() - span.GetStartTimeUnixNano()
 	latencySeconds := 0.0
-
+	if span.GetEndTimeUnixNano() > span.GetStartTimeUnixNano() {
+		latencySeconds = float64(span.GetEndTimeUnixNano()-span.GetStartTimeUnixNano()) / float64(time.Second.Nanoseconds())
+	}
 	labelValues := make([]string, 0, 4+len(p.Cfg.Dimensions))
 	targetInfoLabelValues := make([]string, len(resourceLabels))
 	labels := make([]string, len(p.labels))
@@ -222,18 +224,20 @@ func (p *Processor) aggregateMetricsForSpan(svcName string, jobName string, inst
 	registryLabelValues := p.registry.NewLabelValueCombo(labels, labelValues)
 
 	if p.Cfg.Subprocessors[Count] {
-		// TODO: increase the span count by spanMultiplier
+		// increase the span count by spanMultiplier
+		p.spanMetricsCallsTotal.Inc(registryLabelValues, spanMultiplier)
 	}
 
 	if p.Cfg.Subprocessors[Latency] {
-		// TODO: calculate the latency in the backend
+		// calculate the latency in the backend
 		// hint:
 		// traceId = tempo_util.TraceIDToHexString(span.TraceId)
-		// p.spanMetricsDurationSeconds.ObserveWithExemplar(registryLabelValues, latencySeconds, tempo_util.TraceIDToHexString(span.TraceId), spanMultiplier)
+		p.spanMetricsDurationSeconds.ObserveWithExemplar(registryLabelValues, latencySeconds, tempo_util.TraceIDToHexString(span.TraceId), spanMultiplier)
 	}
 
 	if p.Cfg.Subprocessors[Size] {
-		// TODO: calculate the size in the backend
+		// calculate the size in the backend
+		p.spanMetricsSizeTotal.Inc(registryLabelValues, float64(span.Size()))
 	}
 
 	// update target_info label values
