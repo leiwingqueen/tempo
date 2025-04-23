@@ -40,7 +40,8 @@ type Processor struct {
 	spanMetricsDurationSeconds registry.Histogram
 	spanMetricsSizeTotal       registry.Counter
 	spanMetricsTargetInfo      registry.Gauge
-	labels                     []string
+	// extra label?
+	labels []string
 
 	filter               *spanfilter.SpanFilter
 	filteredSpansCounter prometheus.Counter
@@ -151,11 +152,12 @@ func (p *Processor) aggregateMetrics(resourceSpans []*v1_trace.ResourceSpans) {
 
 func (p *Processor) aggregateMetricsForSpan(svcName string, jobName string, instanceID string, rs *v1.Resource, span *v1_trace.Span, resourceLabels []string, resourceValues []string) {
 	// Spans with negative latency are treated as zero.
+	// calculate the latency in the backend
+	// convert nanoseconds to seconds with span.GetEndTimeUnixNano() - span.GetStartTimeUnixNano()
 	latencySeconds := 0.0
-	if start, end := span.GetStartTimeUnixNano(), span.GetEndTimeUnixNano(); start < end {
-		latencySeconds = float64(end-start) / float64(time.Second.Nanoseconds())
+	if span.GetEndTimeUnixNano() > span.GetStartTimeUnixNano() {
+		latencySeconds = float64(span.GetEndTimeUnixNano()-span.GetStartTimeUnixNano()) / float64(time.Second.Nanoseconds())
 	}
-
 	labelValues := make([]string, 0, 4+len(p.Cfg.Dimensions))
 	targetInfoLabelValues := make([]string, len(resourceLabels))
 	labels := make([]string, len(p.labels))
@@ -222,14 +224,19 @@ func (p *Processor) aggregateMetricsForSpan(svcName string, jobName string, inst
 	registryLabelValues := p.registry.NewLabelValueCombo(labels, labelValues)
 
 	if p.Cfg.Subprocessors[Count] {
-		p.spanMetricsCallsTotal.Inc(registryLabelValues, 1*spanMultiplier)
+		// increase the span count by spanMultiplier
+		p.spanMetricsCallsTotal.Inc(registryLabelValues, spanMultiplier)
 	}
 
 	if p.Cfg.Subprocessors[Latency] {
+		// calculate the latency in the backend
+		// hint:
+		// traceId = tempo_util.TraceIDToHexString(span.TraceId)
 		p.spanMetricsDurationSeconds.ObserveWithExemplar(registryLabelValues, latencySeconds, tempo_util.TraceIDToHexString(span.TraceId), spanMultiplier)
 	}
 
 	if p.Cfg.Subprocessors[Size] {
+		// calculate the size in the backend
 		p.spanMetricsSizeTotal.Inc(registryLabelValues, float64(span.Size()))
 	}
 
